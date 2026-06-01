@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Emberpost">
 <meta name="theme-color" content="#3b2a1a">
 <link rel="manifest" href="manifest.json">
+<script src="config.js" onerror="console.warn('config.js not found — Mapbox tiles unavailable')"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>🔥 Emberpost</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
@@ -86,7 +87,7 @@ img,canvas{image-rendering:pixelated;image-rendering:crisp-edges}
 .toast.show{transform:translateX(-50%) translateY(0)}
 
 /* MODAL OVERLAY */
-.modal{position:fixed;inset:0;z-index:400;display:flex;align-items:flex-end;justify-content:center;padding:0 0 72px;background:rgba(0,0,0,0.65);opacity:0;pointer-events:none;transition:opacity 0.2s}
+.modal{position:fixed;inset:0;z-index:600;display:flex;align-items:flex-end;justify-content:center;padding:0 0 72px;background:rgba(0,0,0,0.65);opacity:0;pointer-events:none;transition:opacity 0.2s}
 .modal.show{opacity:1;pointer-events:all}
 .modal-sheet{width:calc(100% - 24px);max-width:406px;padding:18px;transform:translateY(30px);transition:transform 0.25s cubic-bezier(0.34,1.56,0.64,1)}
 .modal.show .modal-sheet{transform:translateY(0)}
@@ -97,13 +98,13 @@ img,canvas{image-rendering:pixelated;image-rendering:crisp-edges}
 .leaflet-tile-pane{filter:saturate(0.8) brightness(0.7) sepia(0.2) hue-rotate(5deg)}
 
 /* NODE MARKERS */
-.node-marker{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s}
+.node-marker{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;filter:drop-shadow(0 4px 8px rgba(0,0,0,0.7))}
 .node-marker img{width:24px;height:24px}
 .node-herb{background:rgba(20,50,20,0.92);border-color:#4a8a4a}
 .node-ore{background:rgba(40,28,18,0.92);border-color:#8a6040}
 .node-timber{background:rgba(30,20,10,0.92);border-color:#6a5030}
 .node-market{background:rgba(80,40,10,0.92);border-color:var(--amber);width:52px;height:52px}
-.node-marker.exhausted{opacity:0.3;filter:grayscale(1);cursor:not-allowed}
+.node-marker.exhausted{opacity:0.28;filter:grayscale(0.8) drop-shadow(0 2px 3px rgba(0,0,0,0.4));cursor:not-allowed}
 .node-marker.near{animation:nearPulse 1s ease-in-out infinite;border-color:var(--amber-glow) !important;box-shadow:0 0 16px rgba(255,208,96,0.6)}
 .node-undiscovered{background:rgba(30,20,10,0.7);border-color:#5c3a1e;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px dashed #5c3a1e;cursor:pointer}
 @keyframes nearPulse{0%,100%{box-shadow:0 0 8px rgba(255,208,96,0.4)}50%{box-shadow:0 0 20px rgba(255,208,96,0.8)}}
@@ -364,8 +365,12 @@ img,canvas{image-rendering:pixelated;image-rendering:crisp-edges}
 </div>
 
 <!-- ═══════════════════ MAP ═══════════════════ -->
-<div id="screen-map" class="screen">
-  <div id="map" style="flex:1"></div>
+<div id="screen-map" class="screen" style="background:#0f0803">
+  <div style="flex:1;position:relative;overflow:hidden">
+    <div id="map" style="width:100%;height:100%"></div>
+    <div id="map-vignette"></div>
+    <div id="map-tint"></div>
+  </div>
 
   <!-- HUD overlays -->
   <div class="map-hud" style="top:10px;left:10px">
@@ -1228,36 +1233,63 @@ function initMap(lat, lng) {
     minZoom: 14,
     maxZoom: 18
   }).setView([lat, lng], 16);
-  // Try CartoDB Voyager first, fall back to OSM if it fails
-  const cartoLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-    subdomains: "abcd",
-    maxZoom: 18,
-    attribution: ""
+  // Mapbox styled tiles — warm outdoors game-map feel
+  const MAPBOX_TOKEN = window.MAPBOX_TOKEN || "";
+  const MAPBOX_STYLE = "mapbox/outdoors-v12";
+
+  const mapboxLayer = L.tileLayer(
+    "https://api.mapbox.com/styles/v1/" + MAPBOX_STYLE + "/tiles/256/{z}/{x}/{y}@2x?access_token=" + MAPBOX_TOKEN,
+    { maxZoom: 18, tileSize: 256, zoomOffset: 0, attribution: "" }
+  );
+
+  // Fallback to CartoDB if Mapbox fails
+  const fallbackLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd", maxZoom: 18, attribution: ""
   });
 
-  const osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 18,
-    attribution: ""
-  });
+  let mapboxLoaded = false;
 
-  // Try CartoDB first — if tiles fail load OSM
-  let tilesLoaded = false;
-  cartoLayer.on("tileload", () => { tilesLoaded = true; });
-  cartoLayer.on("tileerror", () => {
-    if (!tilesLoaded) {
-      map.removeLayer(cartoLayer);
-      osmLayer.addTo(map);
-      showToast("Using OpenStreetMap tiles");
+  mapboxLayer.on("tileload", () => { mapboxLoaded = true; });
+  mapboxLayer.on("tileerror", () => {
+    if (!mapboxLoaded) {
+      map.removeLayer(mapboxLayer);
+      fallbackLayer.addTo(map);
+      showToast("Using fallback map tiles");
     }
   });
-  cartoLayer.addTo(map);
+  mapboxLayer.addTo(map);
+
+  // Timeout fallback — if no tiles load in 5s, switch to CartoDB
+  setTimeout(() => {
+    if (!mapboxLoaded) {
+      console.warn("Mapbox tiles timed out — switching to CartoDB");
+      try { map.removeLayer(mapboxLayer); } catch(e) {}
+      fallbackLayer.addTo(map);
+    }
+  }, 5000);
+
+  // Apply warm game-map filter to tile pane
+  map.whenReady(() => {
+    const tilePanes = document.querySelectorAll(
+      ".leaflet-tile-pane, .leaflet-layer"
+    );
+    tilePanes.forEach(pane => {
+      pane.style.filter = [
+        "sepia(55%)",
+        "saturate(75%)",
+        "brightness(0.88)",
+        "contrast(1.08)",
+        "hue-rotate(8deg)",
+      ].join(" ");
+    });
+  });
 
   // Home marker
-  const homeIcon = L.divIcon({ className: "", html: "<div style='font-size:24px;filter:drop-shadow(0 2px 4px black)'>🏠</div>", iconSize: [32,32], iconAnchor: [16,16] });
+  const homeIcon = L.divIcon({ className: "", html: `<div style='display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 3px 8px rgba(0,0,0,0.8))'><div style='font-size:28px;line-height:1'>🏠</div><div style='font-family:Cinzel,serif;font-size:7px;color:var(--amber-glow);background:rgba(15,8,3,0.85);border:1px solid var(--amber);border-radius:2px;padding:1px 5px;margin-top:2px;white-space:nowrap;letter-spacing:0.08em'>HOME</div></div>`, iconSize: [32,32], iconAnchor: [16,16] });
   L.marker([lat, lng], { icon: homeIcon }).addTo(map);
 
   // Player marker
-  const playerIcon = L.divIcon({ className: "", html: `<div class="player-marker"><img src="${ASSETS.FARMER}" style="width:32px;height:32px;object-fit:none;object-position:0 -32px"></div>`, iconSize: [48,48], iconAnchor: [24,24] });
+  const playerIcon = L.divIcon({ className: "", html: `<div class="player-marker" style="filter:drop-shadow(0 3px 8px rgba(0,0,0,0.9))"><img src="${ASSETS.FARMER}" style="width:32px;height:32px;object-fit:none;object-position:0 -32px"></div>`, iconSize: [48,48], iconAnchor: [24,24] });
   playerMarker = L.marker([lat, lng], { icon: playerIcon, zIndexOffset: 1000 }).addTo(map);
 
   // Spawn nodes and markets
@@ -1483,15 +1515,43 @@ function updatePackBadge() {
 // GPS
 // ═══════════════════════════════════════════════════════
 function startGPS() {
-  if (!navigator.geolocation) { startFallbackMode(); return; }
+  // Always init map immediately — don't wait for GPS
+  if (!map) {
+    const lat = STATE.homeLat || 47.674;
+    const lng = STATE.homeLng || -122.125;
+    initMap(lat, lng);
+  }
+
+  if (!navigator.geolocation) {
+    startFallbackMode();
+    return;
+  }
+
+  // Try to get GPS with a short timeout — map already visible
   watchId = navigator.geolocation.watchPosition(
     pos => {
       const { latitude: lat, longitude: lng } = pos.coords;
-      if (!STATE.homeLat) initMap(lat, lng);
+      STATE.useRealGPS = true;
+      const btn = document.getElementById("gps-mode-btn");
+      if (btn) btn.textContent = "📍 GPS: ON";
+      if (!STATE.homeLat) {
+        // First real GPS fix — re-center home and nodes
+        STATE.homeLat = lat;
+        STATE.homeLng = lng;
+        map.setView([lat, lng], 16);
+        NODE_DEFS.forEach(def => spawnNodeMarker(def, lat, lng));
+        MARKET_DEFS.forEach(def => spawnMarketMarker(def, lat, lng));
+      }
       movePlayerTo(lat, lng);
     },
-    err => { console.warn("GPS error:", err); startFallbackMode(); },
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    err => {
+      if (!window._gpsErrShown) {
+        console.warn("GPS error:", err);
+        window._gpsErrShown = true;
+      }
+      startFallbackMode();
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 8000 }
   );
 }
 
@@ -1499,12 +1559,12 @@ function startFallbackMode() {
   STATE.useRealGPS = false;
   const btn = document.getElementById("gps-mode-btn");
   if (btn) btn.textContent = "📍 GPS: OFF (tap to move)";
-  showToast("GPS unavailable — tap the map to move");
-  // Use a default location if no GPS
-  if (!STATE.homeLat) {
-    const defaultLat = 47.674;
-    const defaultLng = -122.125;
-    initMap(defaultLat, defaultLng);
+  if (!map) {
+    // Map not yet loaded — init with default or saved location
+    const lat = STATE.homeLat || 47.674;
+    const lng = STATE.homeLng || -122.125;
+    initMap(lat, lng);
+    showToast("GPS unavailable — tap the map to move");
   }
 }
 
@@ -2716,12 +2776,16 @@ function enterGame() {
     renderHomeStations();
     updateGardenVisibility();
     renderChest();
-    renderFeed();
+    renderEntryFeed();
 
     if (offlineMins >= 1) {
       setTimeout(() => showReturnSummary(saved.savedAt, offlineSales), 600);
     } else {
       showToast("🔥 Welcome back to Emberpost!");
+    }
+    // Returning player: spawn a customer sooner than the 3.5min interval
+    if (STATE.sessionSalesCount >= 1) {
+      setTimeout(() => spawnCustomer(), 20000);
     }
 
   } else {
@@ -2761,7 +2825,7 @@ function enterGame() {
   initMarketState();
   setInterval(triggerPassiveSale, 90000);
   setInterval(() => {
-    if (STATE.sessionSalesCount >= 1 && currentScreen === "screen-home") spawnCustomer();
+    if (STATE.sessionSalesCount >= 1) spawnCustomer();
   }, 210000);
 
   document.getElementById("entry-gold").textContent = "+" + STATE.sessionGoldEarned + "g";
@@ -3673,11 +3737,15 @@ setInterval(saveState, 30000);
 </script>
 <script>
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js")
-        .then(() => console.log("Emberpost SW registered"))
-        .catch(e => console.log("SW registration failed:", e));
-    });
+    const host = window.location.hostname;
+    const isRealHost = host !== "" && !host.includes("claudeusercontent") && host !== "localhost";
+    if (isRealHost) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js?v=3")
+          .then(() => console.log("Emberpost SW registered"))
+          .catch(e => console.log("SW registration failed:", e));
+      });
+    }
   }
 </script>
 </body>
