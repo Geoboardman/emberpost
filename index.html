@@ -1235,10 +1235,10 @@ function initMap(lat, lng) {
   }).setView([lat, lng], 16);
   // Mapbox styled tiles — warm outdoors game-map feel
   const MAPBOX_TOKEN = window.MAPBOX_TOKEN || "";
-  const MAPBOX_STYLE = "mapbox/outdoors-v12";
+  const MAPBOX_STYLE = "geoboardman/cmpugrhq1000i01s653fn3ksu";
 
   const mapboxLayer = L.tileLayer(
-    "https://api.mapbox.com/styles/v1/" + MAPBOX_STYLE + "/tiles/256/{z}/{x}/{y}@2x?access_token=" + MAPBOX_TOKEN,
+    "https://api.mapbox.com/styles/v1/" + MAPBOX_STYLE + "/tiles/{z}/{x}/{y}@2x?access_token=" + MAPBOX_TOKEN,
     { maxZoom: 18, tileSize: 256, zoomOffset: 0, attribution: "" }
   );
 
